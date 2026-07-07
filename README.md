@@ -1,3 +1,4 @@
+
 # Template for Isaac Lab Projects
 
 ## Overview
@@ -42,6 +43,21 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
         ```bash
         # use 'FULL_PATH_TO_isaaclab.sh|bat -p' instead of 'python' if Isaac Lab is not installed in Python venv or conda
         python scripts/<RL_LIBRARY>/train.py --task=<TASK_NAME>
+        ```
+        
+        For instance
+        
+        ```bash
+        python scripts/skrl/train.py --task Anymal-Command-Tracking-Direct-v0
+        ```
+
+    - Playing a trained policy		
+
+        ```bash
+        python scripts/skrl/play.py \
+            --task Anymal-Command-Tracking-Direct-v0 \
+            --checkpoint <agent>.pt
+            --num_envs 1
         ```
 
     - Running a task with dummy agents:
@@ -133,3 +149,4 @@ Some examples of packages that can likely be excluded are:
 "<path-to-isaac-sim>/extscache/omni.services.*"     // Services tools
 ...
 ```
+
