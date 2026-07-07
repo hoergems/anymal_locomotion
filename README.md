@@ -56,7 +56,7 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
         ```bash
         python scripts/skrl/play.py \
             --task Anymal-Command-Tracking-Direct-v0 \
-            --checkpoint <agent>.pt
+            --checkpoint <agent>.pt \
             --num_envs 1
         ```
 
