@@ -15,7 +15,7 @@ from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.utils.math import quat_apply_inverse
 
 from .anymal_nav_env_cfg import AnymalNavEnvCfg
-from anymal_navigation.utils.utils import sixd_to_quat, quat_to_sixd
+from .utils import sixd_to_quat, quat_to_sixd
 
 
 class AnymalNavEnv(DirectRLEnv):

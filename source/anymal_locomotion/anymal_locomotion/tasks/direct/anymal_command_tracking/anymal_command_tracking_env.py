@@ -52,7 +52,8 @@ class AnymalCommandTrackingEnv(DirectRLEnv):
         # Get specific body indices
         self._base_id, _ = self._contact_sensor.find_bodies("base")
         self._feet_ids, _ = self._contact_sensor.find_bodies(".*FOOT")
-        self._undesired_contact_body_ids, _ = self._contact_sensor.find_bodies(".*THIGH")
+        #self._undesired_contact_body_ids, _ = self._contact_sensor.find_bodies(".*THIGH")
+        self._undesired_contact_body_ids, _ = self._contact_sensor.find_bodies("base|.*THIGH")
 
     def _setup_scene(self):
         # Add the robot to the scene
