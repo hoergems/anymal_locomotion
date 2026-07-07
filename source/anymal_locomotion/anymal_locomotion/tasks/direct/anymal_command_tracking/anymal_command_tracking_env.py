@@ -114,7 +114,7 @@ class AnymalCommandTrackingEnv(DirectRLEnv):
                 # Angular velocity (roll, pitch, yaw rates) in the robot's base frame.
                 self._robot.data.root_ang_vel_b,
 
-                # Gravity vector expressed in the robot's base frame.
+                # Gravity direction expressed in the robot's base frame.
                 # This provides information about the robot's orientation.
                 self._robot.data.projected_gravity_b,
 

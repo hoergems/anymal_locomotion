@@ -167,9 +167,6 @@ class AnymalNavEnvCfg(DirectRLEnvCfg):
     flat_orientation_reward_scale = -5.0
     progress_reward_scale = 450.0
     goal_bonus_reward_scale = 500.0
-    #distance_penalty_scale = -0.1
-    distance_penalty_scale = 0.0
-    speed_penalty_scale = -1.0
-    #min_speed_penalty_scale = -2.0
+    speed_penalty_scale = -1.0    
     min_speed_penalty_scale = -10.0
     heading_reward_scale = 0.5

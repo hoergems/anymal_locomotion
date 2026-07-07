@@ -47,17 +47,14 @@ class AnymalNavEnv(DirectRLEnv):
                 "undesired_contacts",
                 "flat_orientation_l2",
                 "progress_reward",
-                "goal_bonus",
-                "distance_penalty",
-                "speed_penalty",
+                "goal_bonus",                       
                 "min_speed_penalty",
+                "max_speed_penalty",
                 "heading_reward",
             ]
         }
         # Get specific body indices
-        self._base_id, _ = self._contact_sensor.find_bodies("base")
         self._feet_ids, _ = self._contact_sensor.find_bodies(".*FOOT")
-        #self._undesired_contact_body_ids, _ = self._contact_sensor.find_bodies(".*THIGH")
         self._undesired_contact_body_ids, _ = self._contact_sensor.find_bodies("base|.*THIGH")
 
     def _setup_scene(self):
@@ -85,10 +82,10 @@ class AnymalNavEnv(DirectRLEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor):
         self._actions = actions.clone()
-        self._processed_actions = self.cfg.action_scale * self._actions + self._robot.data.default_joint_pos
+        self._target_joint_angles = self.cfg.action_scale * self._actions + self._robot.data.default_joint_pos
 
     def _apply_action(self):
-        self._robot.set_joint_position_target(self._processed_actions)
+        self._robot.set_joint_position_target(self._target_joint_angles)
 
     def _get_observations(self) -> dict:
         self._previous_actions = self._actions.clone()
@@ -106,40 +103,27 @@ class AnymalNavEnv(DirectRLEnv):
             goal_vec_w_3d,
         )[:, :2]
 
-        '''goal_heading = torch.atan2(
-            goal_vec_b[:, 1],
-            goal_vec_b[:, 0],
-        ).unsqueeze(-1)'''
-        
-        obs = torch.cat(
-            [
-                tensor
-                for tensor in (
-                    self._robot.data.root_lin_vel_b,
-                    self._robot.data.root_ang_vel_b,
-                    self._robot.data.projected_gravity_b,
-                    goal_vec_b,
-                    goal_dist,                    
-                    self._robot.data.joint_pos - self._robot.data.default_joint_pos,
-                    self._robot.data.joint_vel,                    
-                    self._actions,
-                )
-                if tensor is not None
-            ],
-            dim=-1,
-        )
+        obs = torch.cat([
+            self._robot.data.root_lin_vel_b,
+            self._robot.data.root_ang_vel_b,
+            self._robot.data.projected_gravity_b,
+            goal_vec_b, # Vector to goal in the robot's base frame
+            goal_dist, # Distance to the goal
+            self._robot.data.joint_pos - self._robot.data.default_joint_pos,
+            self._robot.data.joint_vel,
+            self._actions,
+        ], dim=-1)
 
         observations = {"policy": obs}
         return observations
 
     def _get_rewards(self) -> torch.Tensor:
-        # Progress to goal reward
+        # Reward progress towards the goal
         root_pos = self._robot.data.root_pos_w[:, :2] - self._terrain.env_origins[:, :2]
         goal_vec_w = self._goal_pos - root_pos
         goal_dist = torch.norm(goal_vec_w, dim=-1)
         progress_reward = self._prev_goal_dist - goal_dist
-        progress_reward = torch.clamp(progress_reward, max=0.02)
-        #print("progress_reward", progress_reward[0])
+        progress_reward = torch.clamp(progress_reward, max=0.02)        
         self._prev_goal_dist = goal_dist.detach()
 
         # Heading reward: encourage robot's forward direction to point toward the goal
@@ -158,14 +142,13 @@ class AnymalNavEnv(DirectRLEnv):
 
         # Bonus for reaching the goal
         goal_bonus = (goal_dist < self.cfg.goal_radius).float()
-        distance_penalty = goal_dist
-
-        # Excessive velocity penalty
-        speed_xy = torch.norm(self._robot.data.root_lin_vel_b[:, :2], dim=-1)
-        speed_penalty = torch.square(torch.clamp(speed_xy - 0.8, min=0.0))
-        min_speed_penalty = torch.square(torch.clamp(0.3 - speed_xy, min=0.0))
-
         
+        speed_xy = torch.norm(self._robot.data.root_lin_vel_b[:, :2], dim=-1)
+        # Penalty for walking too fast
+        max_speed_penalty = torch.square(torch.clamp(speed_xy - 0.8, min=0.0))
+
+        # Penalty for standing still
+        min_speed_penalty = torch.square(torch.clamp(0.3 - speed_xy, min=0.0))        
 
         # z velocity tracking
         z_vel_error = torch.square(self._robot.data.root_lin_vel_b[:, 2])
@@ -201,8 +184,7 @@ class AnymalNavEnv(DirectRLEnv):
             "flat_orientation_l2": flat_orientation * self.cfg.flat_orientation_reward_scale * self.step_dt,
             "progress_reward": progress_reward * self.cfg.progress_reward_scale * self.step_dt,
             "goal_bonus": goal_bonus * self.cfg.goal_bonus_reward_scale * self.step_dt,
-            "distance_penalty": distance_penalty * self.cfg.distance_penalty_scale * self.step_dt,
-            "speed_penalty": speed_penalty * self.cfg.speed_penalty_scale * self.step_dt,
+            "max_speed_penalty": max_speed_penalty * self.cfg.speed_penalty_scale * self.step_dt,
             "min_speed_penalty": min_speed_penalty * self.cfg.min_speed_penalty_scale * self.step_dt,
             "heading_reward": heading_reward * self.cfg.heading_reward_scale * self.step_dt,
         }
@@ -243,11 +225,9 @@ class AnymalNavEnv(DirectRLEnv):
         joint_pos = self._robot.data.default_joint_pos[env_ids]
         joint_vel = self._robot.data.default_joint_vel[env_ids]
         default_root_state = self._robot.data.default_root_state[env_ids].clone()
+
+        # Initial y-position of the robot is uniformly distributed in [0, 10]
         default_root_state[:, 1].uniform_(0.0, 10.0)
-
-        # Sample collision-free initial xy position in the local environment frame
-        #default_root_state[:, 0:2] = self.sample_initial_robot_xy(env_ids).clone()
-
         default_root_state[:, :3] += self._terrain.env_origins[env_ids]
         self._robot.write_root_pose_to_sim(default_root_state[:, :7], env_ids)
         self._robot.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids)
@@ -268,115 +248,3 @@ class AnymalNavEnv(DirectRLEnv):
         extras["Episode_Termination/base_contact"] = torch.count_nonzero(self.reset_terminated[env_ids]).item()
         extras["Episode_Termination/time_out"] = torch.count_nonzero(self.reset_time_outs[env_ids]).item()
         self.extras["log"].update(extras)
-
-    def sample_initial_robot_xy(self, env_ids: torch.Tensor) -> torch.Tensor:
-        obstacle_centers = []
-        obstacle_half_extents = []
-
-        for name, obj_cfg in self.cfg.obstacles.rigid_objects.items():
-            # Ignore explicitly non-collidable objects, e.g. goal
-            collision_props = obj_cfg.spawn.collision_props
-            if collision_props is not None and collision_props.collision_enabled is False:
-                continue
-
-            # Only consider cuboids
-            if not isinstance(obj_cfg.spawn, sim_utils.CuboidCfg):
-                continue
-
-            obstacle_centers.append(obj_cfg.init_state.pos[:2])
-            obstacle_half_extents.append(
-                (
-                    obj_cfg.spawn.size[0] / 2.0,
-                    obj_cfg.spawn.size[1] / 2.0,
-                )
-            )
-
-        if len(obstacle_centers) == 0:
-            obstacle_centers = torch.empty((0, 2), dtype=torch.float32, device=self.device)
-            obstacle_half_extents = torch.empty((0, 2), dtype=torch.float32, device=self.device)
-        else:
-            obstacle_centers = torch.tensor(obstacle_centers, dtype=torch.float32, device=self.device)
-            obstacle_half_extents = torch.tensor(obstacle_half_extents, dtype=torch.float32, device=self.device)
-
-        return self.sample_collision_free_xy(
-            env_ids=env_ids,
-            obstacle_centers_xy=obstacle_centers,
-            obstacle_half_extents_xy=obstacle_half_extents,
-            xy_range=(0.0, 10.0),
-            robot_radius=0.7,
-        )
-
-    def sample_collision_free_xy(
-        self,
-        env_ids: torch.Tensor,
-        obstacle_centers_xy: torch.Tensor,
-        obstacle_half_extents_xy: torch.Tensor,
-        xy_range: tuple[float, float] = (-10.0, 10.0),
-        robot_radius: float = 0.7,
-        max_tries: int = 100,
-    ) -> torch.Tensor:
-        """Sample collision-free robot positions in the local environment frame.
-
-        Obstacles are approximated as axis-aligned rectangles (AABBs), inflated by
-        the robot radius. The robot itself is approximated as a circle.
-
-        Args:
-            env_ids: Environment ids to sample for.
-            obstacle_centers_xy: Tensor of shape [num_obstacles, 2].
-            obstacle_half_extents_xy: Tensor of shape [num_obstacles, 2].
-            xy_range: Uniform sampling range for x and y coordinates.
-            robot_radius: Radius of the robot's collision approximation.
-            max_tries: Maximum number of rejection sampling iterations.
-
-        Returns:
-            Tensor of shape [len(env_ids), 2] containing collision-free xy positions.
-        """
-
-        device = self.device
-        num_envs = len(env_ids)
-        low, high = xy_range
-
-        # Inflate obstacles by the robot radius.
-        inflated_half_extents = obstacle_half_extents_xy + robot_radius
-
-        # Output tensor
-        positions = torch.empty(num_envs, 2, device=device)
-        valid = torch.zeros(num_envs, dtype=torch.bool, device=device)
-
-        for _ in range(max_tries):
-
-            remaining = (~valid).nonzero(as_tuple=False).squeeze(-1)
-            if len(remaining) == 0:
-                break
-
-            candidates = torch.empty(
-                len(remaining), 2, device=device
-            ).uniform_(low, high)
-
-            # Compute distance to every obstacle.
-            # Shape: [num_candidates, num_obstacles, 2]
-            delta = torch.abs(
-                candidates[:, None, :] - obstacle_centers_xy[None, :, :]
-            )
-
-            # Candidate is inside an inflated obstacle iff both coordinates are inside.
-            inside = torch.all(
-                delta <= inflated_half_extents[None, :, :],
-                dim=-1,
-            )
-
-            collision = torch.any(inside, dim=1)
-            accepted = ~collision
-
-            positions[remaining[accepted]] = candidates[accepted]
-            valid[remaining[accepted]] = True
-
-        if not torch.all(valid):
-            raise RuntimeError(
-                "Failed to sample collision-free robot positions after "
-                f"{max_tries} attempts. Consider increasing the sampling area "
-                "or reducing obstacle coverage."
-            )
-
-        return positions
-
