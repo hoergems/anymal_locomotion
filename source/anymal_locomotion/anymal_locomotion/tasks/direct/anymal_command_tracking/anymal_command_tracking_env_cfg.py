@@ -25,7 +25,10 @@ def randomize_target_velocity(env, env_ids: torch.Tensor | None):
 
 @configclass
 class EventCfg:
-    """Configuration for randomization."""
+    """Configuration of environment events."""
+
+    # Apply a new random command (desired base velocity)
+    # every 2 seconds
     set_target_velocity = EventTerm(
         func=randomize_target_velocity,
         mode="interval",
@@ -34,17 +37,17 @@ class EventCfg:
 
 @configclass
 class AnymalCommandTrackingEnvCfg(DirectRLEnvCfg):
-    # env
-    episode_length_s = 20.0
-    action_space = 12
-    observation_space = 48
-    state_space = 0
-
-    # simulation setup
+    # Simulation setup
+    # Physics integration time step (in seconds)
+    dt = 0.005
+    # One environment step consists of 4 physics integration steps
     decimation = 4
+
     sim: SimulationCfg = SimulationCfg(
-        dt=1 / 200,
+        dt=dt,
         render_interval=decimation,
+
+        # Default physics material setting for rigid bodies
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
             restitution_combine_mode="multiply",
@@ -69,21 +72,31 @@ class AnymalCommandTrackingEnvCfg(DirectRLEnvCfg):
         debug_vis=False,
     )
 
-    # scene
+    # Configuration of the simulated scene and parallel environments
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
 
-    # events
-    events: EventCfg = EventCfg()
-
-    # robot
+    # Configuration of the ANYmal C robot
     robot: ArticulationCfg = ANYMAL_C_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
-    # contact sensor
+    # Configuration of a contact sensor attached to the robot
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*", history_length=3, update_period=0.005, track_air_time=True
     )
 
-    # reward scales
+    # Configuration of environment events (command randomization in this case)
+    events: EventCfg = EventCfg()
+
+    # RL settings
+    # Maximum duration of an episode
+    episode_length_s = 20.0
+    # Size of the action space
+    action_space = 12
+    # Size of the observation space
+    observation_space = 48
+    # Size of the privileged state space (0 = not used)
+    state_space = 0
+
+    # Reward term scales
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
     z_vel_reward_scale = -2.0
